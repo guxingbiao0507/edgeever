@@ -1,4 +1,4 @@
-import { ARCHITECTURE_RESOURCE_ICONS } from "@edgeever/shared";
+import { ARCHITECTURE_RESOURCE_ICONS, MAX_MEMO_TITLE_LENGTH } from "@edgeever/shared";
 
 const DIAGRAM_IR_NODE_TYPES = [
   "topic",
@@ -133,7 +133,7 @@ const MCP_TOOL_DEFINITIONS = [
       additionalProperties: false,
       properties: {
         notebookId: { type: "string", minLength: 1 },
-        title: { type: "string", maxLength: 160 },
+        title: { type: "string", maxLength: MAX_MEMO_TITLE_LENGTH },
         kind: { type: "string", enum: ["mind-map", "flowchart", "architecture"] },
         theme: { type: "string", enum: ["brand", "sun", "wa", "island", "rose", "mint", "cosmos", "tea", "naive", "macaron", "ocean", "ink", "classic", "paper"] },
         structure: { type: "string", enum: ["map", "line", "capsule", "box", "circle", "ellipse", "hexagon", "logic", "tree", "brace", "org", "timeline", "fishbone"] },
@@ -256,7 +256,7 @@ const MCP_TOOL_DEFINITIONS = [
                 maxLength: 512,
                 description: "Stable ID from the source system. It is the idempotency key within source and workspace.",
               },
-              title: { type: "string", maxLength: 160 },
+              title: { type: "string", maxLength: MAX_MEMO_TITLE_LENGTH },
               contentMarkdown: { type: "string" },
               tags: { type: "array", maxItems: 100, items: { type: "string" } },
               createdAt: { type: "string", format: "date-time" },
@@ -623,7 +623,7 @@ const MCP_TOOL_DEFINITIONS = [
         name: { type: "string", minLength: 1, maxLength: 160 },
         description: { type: "string", maxLength: 500 },
         memoId: { type: "string", minLength: 1, description: "Existing memo to copy into the template." },
-        title: { type: ["string", "null"], maxLength: 160 },
+        title: { type: ["string", "null"], maxLength: MAX_MEMO_TITLE_LENGTH },
         contentMarkdown: { type: "string" },
         tags: { type: "array", items: { type: "string" } },
       },
@@ -640,7 +640,7 @@ const MCP_TOOL_DEFINITIONS = [
         templateId: { type: "string", minLength: 1 },
         name: { type: "string", minLength: 1, maxLength: 160 },
         description: { type: ["string", "null"], maxLength: 500 },
-        title: { type: ["string", "null"], maxLength: 160 },
+        title: { type: ["string", "null"], maxLength: MAX_MEMO_TITLE_LENGTH },
         contentMarkdown: { type: "string" },
         tags: { type: "array", items: { type: "string" } },
       },

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MAX_MEMO_TITLE_LENGTH } from "./memo-limits";
 import {
   AI_ACTIONS,
   AI_ATTACHMENT_MEDIA_TYPES,
@@ -27,7 +28,7 @@ export const NotebookUpdateSchema = z.object({
 
 export const MemoCreateSchema = z.object({
   notebookId: z.string().trim().min(1),
-  title: z.string().trim().max(160).optional(),
+  title: z.string().trim().max(MAX_MEMO_TITLE_LENGTH).optional(),
   contentJson: z.unknown().optional(),
   contentMarkdown: z.string().optional(),
   tags: z.array(z.string()).optional(),
@@ -40,7 +41,7 @@ export const MemoUpdateSchema = z.object({
   expectedContentHash: z.string().length(64).optional(),
   editSessionId: z.string().trim().min(1).optional(),
   notebookId: z.string().trim().min(1).optional(),
-  title: z.string().trim().max(160).optional(),
+  title: z.string().trim().max(MAX_MEMO_TITLE_LENGTH).optional(),
   isPinned: z.boolean().optional(),
   contentJson: z.unknown().optional(),
   contentMarkdown: z.string().optional(),
@@ -54,7 +55,7 @@ export const TemplateCreateSchema = z.object({
   name: z.string().trim().min(1).max(160),
   description: z.string().trim().max(500).optional(),
   memoId: z.string().trim().min(1).optional(),
-  title: z.string().trim().max(160).nullable().optional(),
+  title: z.string().trim().max(MAX_MEMO_TITLE_LENGTH).nullable().optional(),
   contentMarkdown: z.string().optional(),
   tags: z.array(z.string()).optional(),
 }).refine((input) => input.memoId || input.contentMarkdown !== undefined, {
@@ -64,7 +65,7 @@ export const TemplateCreateSchema = z.object({
 export const TemplateUpdateSchema = z.object({
   name: z.string().trim().min(1).max(160).optional(),
   description: z.string().trim().max(500).nullable().optional(),
-  title: z.string().trim().max(160).nullable().optional(),
+  title: z.string().trim().max(MAX_MEMO_TITLE_LENGTH).nullable().optional(),
   contentMarkdown: z.string().optional(),
   tags: z.array(z.string()).optional(),
 });
@@ -162,7 +163,7 @@ export const DeleteMemosSchema = z.object({
 export const MergeMemosSchema = z.object({
   memoIds: z.array(z.string().trim().min(1)).min(2).max(50),
   notebookId: z.string().trim().min(1).optional(),
-  title: z.string().trim().max(160).optional(),
+  title: z.string().trim().max(MAX_MEMO_TITLE_LENGTH).optional(),
 });
 
 export const LoginSchema = z.object({
@@ -315,7 +316,7 @@ export const AiGenerateSchema = z.object({
   action: z.enum(AI_ACTIONS),
   promptId: z.string().trim().min(1).max(200).optional(),
   locale: z.string().trim().min(2).max(35).optional(),
-  title: z.string().trim().max(160).default(""),
+  title: z.string().trim().max(MAX_MEMO_TITLE_LENGTH).default(""),
   contentMarkdown: z.string().max(300_000),
   stream: z.boolean().default(false),
   targetLanguage: z.enum(AI_TARGET_LANGUAGES).optional(),
@@ -346,7 +347,7 @@ export const AiGenerateSchema = z.object({
 });
 
 export const AiTagSuggestionsRequestSchema = z.object({
-  title: z.string().trim().max(160).default(""),
+  title: z.string().trim().max(MAX_MEMO_TITLE_LENGTH).default(""),
   contentMarkdown: z.string().max(300_000),
   currentTags: z.array(z.string().trim().min(1).max(200)).max(24).default([]),
   locale: z.string().trim().min(2).max(35).optional(),

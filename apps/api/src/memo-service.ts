@@ -10,6 +10,7 @@ import {
   resolveMergedMemoTitle,
   isSuspiciousMemoOverwrite,
   isMemoEditBindingValid,
+  MAX_MEMO_TITLE_LENGTH,
   normalizeTags,
   type MemoDetail,
   type MemoEditSession,
@@ -1026,8 +1027,8 @@ const parseMemoImportItem = (value: unknown, index: number) => {
     throw new Error(`items[${index}].title must be a string`);
   }
   const title = typeof item.title === "string" ? item.title.trim() : undefined;
-  if (title && title.length > 160) {
-    throw new Error(`items[${index}].title must be at most 160 characters`);
+  if (title && title.length > MAX_MEMO_TITLE_LENGTH) {
+    throw new Error(`items[${index}].title must be at most ${MAX_MEMO_TITLE_LENGTH} characters`);
   }
   if (item.contentMarkdown !== undefined && typeof item.contentMarkdown !== "string") {
     throw new Error(`items[${index}].contentMarkdown must be a string`);

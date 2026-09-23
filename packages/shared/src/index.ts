@@ -18,6 +18,7 @@ export * from "./image-gallery";
 export * from "./image-referrer";
 export * from "./markdown-image";
 export * from "./memo-safety";
+export * from "./memo-limits";
 export * from "./memo-conflict";
 export * from "./memo-content-style";
 export * from "./memo-timestamps";

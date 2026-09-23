@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MAX_MEMO_TITLE_LENGTH } from "./memo-limits";
 
 export const CompanionIdSchema = z.string().uuid();
 export const CompanionMemoryInputSchema = z.object({
@@ -13,7 +14,7 @@ export const CompanionTurnFocusSchema = z.object({
   memoId: z.string().trim().min(1).max(100).optional(),
   notebookId: z.string().trim().min(1).max(100).optional(),
   notebookTitle: z.string().trim().max(160).optional(),
-  title: z.string().trim().max(160).optional(),
+  title: z.string().trim().max(MAX_MEMO_TITLE_LENGTH).optional(),
   selectionMarkdown: z.string().max(2000).optional(),
   contentMarkdown: z.string().max(4000).optional(),
   contentTruncated: z.boolean().optional(),
@@ -22,7 +23,7 @@ export const CompanionTurnFocusSchema = z.object({
 export const CompanionMentionSchema = z.object({
   type: z.enum(["memo", "notebook", "tag"]),
   id: z.string().trim().min(1).max(100),
-  title: z.string().trim().max(160).optional(),
+  title: z.string().trim().max(MAX_MEMO_TITLE_LENGTH).optional(),
 }).strict();
 export type CompanionMention = z.infer<typeof CompanionMentionSchema>;
 
@@ -202,7 +203,7 @@ const noteId = z.string().trim().min(1).max(100);
 export const CompanionMergePlanSchema = z.object({
   kind: z.literal("merge"),
   memoIds: z.array(noteId).min(2).max(5),
-  title: z.string().trim().min(1).max(160),
+  title: z.string().trim().min(1).max(MAX_MEMO_TITLE_LENGTH),
   reason: actionReason,
 }).strict();
 export const CompanionTagPlanSchema = z.object({

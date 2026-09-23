@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { MAX_MEMO_TITLE_LENGTH } from "@edgeever/shared";
 import {
   getMarkdownFileTitle,
   isMarkdownFile,
@@ -14,7 +15,7 @@ describe("Markdown file import", () => {
 
   test("uses the filename without its extension as the note title", () => {
     expect(getMarkdownFileTitle(" docker install - setup.md ")).toBe("docker install - setup");
-    expect(getMarkdownFileTitle(`${"a".repeat(200)}.md`)).toHaveLength(160);
+    expect(getMarkdownFileTitle(`${"a".repeat(MAX_MEMO_TITLE_LENGTH + 50)}.md`)).toHaveLength(MAX_MEMO_TITLE_LENGTH);
   });
 
   test("preserves Markdown content while removing a UTF-8 BOM", async () => {

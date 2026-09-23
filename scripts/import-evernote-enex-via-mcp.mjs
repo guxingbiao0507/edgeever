@@ -363,7 +363,7 @@ function normalizeNote(note, index) {
 
   return {
     externalId,
-    title: title.slice(0, 160),
+    title: title.slice(0, 50_000),
     markdown,
     tags,
     createdAt,

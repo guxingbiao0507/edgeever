@@ -1,5 +1,5 @@
 const MARKDOWN_FILE_EXTENSION_PATTERN = /\.(?:md|markdown)$/i;
-const MAX_MEMO_TITLE_LENGTH = 160;
+import { MAX_MEMO_TITLE_LENGTH } from "@edgeever/shared";
 
 export const isMarkdownFile = (file: Pick<File, "name">) =>
   MARKDOWN_FILE_EXTENSION_PATTERN.test(file.name.trim());

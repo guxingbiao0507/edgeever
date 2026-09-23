@@ -13,6 +13,7 @@ import {
   type DiagramNodeShape,
   type MemoDetail,
   type MemoSummary,
+  MAX_MEMO_TITLE_LENGTH,
   type MemoUpdateInput,
 } from "@edgeever/shared";
 import type { DiagramIr, DiagramIrNodeType } from "@edgeever/shared/diagram-layout";
@@ -282,8 +283,12 @@ const parseDiagramMemoIr = (args: Record<string, unknown>): DiagramIr => {
   if (args.structure !== undefined && !["map", "line", "capsule", "box", "circle", "ellipse", "hexagon", "logic", "tree", "brace", "org", "timeline", "fishbone"].includes(String(args.structure))) {
     throw new AppError("invalid_params", "structure is not a supported mind-map shape", 400);
   }
-  if (args.title !== undefined && (typeof args.title !== "string" || args.title.length > 160)) {
-    throw new AppError("invalid_params", "title must be a string with at most 160 characters", 400);
+  if (args.title !== undefined && (typeof args.title !== "string" || args.title.length > MAX_MEMO_TITLE_LENGTH)) {
+    throw new AppError(
+      "invalid_params",
+      `title must be a string with at most ${MAX_MEMO_TITLE_LENGTH} characters`,
+      400,
+    );
   }
   if (args.tags !== undefined && (
     !Array.isArray(args.tags) || args.tags.length > 100 || args.tags.some((tag) => typeof tag !== "string")

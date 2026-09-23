@@ -1,4 +1,10 @@
-import type { CompanionToolCall, CompanionToolEffect, CompanionTodo, CompanionQuestion } from "@edgeever/shared";
+import {
+  MAX_MEMO_TITLE_LENGTH,
+  type CompanionToolCall,
+  type CompanionToolEffect,
+  type CompanionTodo,
+  type CompanionQuestion,
+} from "@edgeever/shared";
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -12,7 +18,7 @@ const effect = (kind: CompanionToolEffect["kind"], memo?: { id?: string; title?:
   kind,
   ...(memo?.id ? { memoId: memo.id } : {}),
   ...(memo?.notebookId ? { notebookId: memo.notebookId } : {}),
-  ...(typeof memo?.title === "string" && memo.title ? { title: memo.title.slice(0, 160) } : {}),
+  ...(typeof memo?.title === "string" && memo.title ? { title: memo.title.slice(0, MAX_MEMO_TITLE_LENGTH) } : {}),
   ...(typeof memo?.revision === "number" ? { revision: memo.revision } : {}),
   ...extra,
 });

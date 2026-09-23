@@ -11,7 +11,7 @@ describe("shared memo title input", () => {
     expect(componentSource).toContain("sm:text-2xl");
     expect(componentSource).not.toContain("lg:text-[26px]");
     expect(componentSource).toContain("focus-visible:bg-muted");
-    expect(componentSource).toContain("maxLength={160}");
+    expect(componentSource).toContain("maxLength={MAX_MEMO_TITLE_LENGTH}");
     expect(componentSource).toContain("readOnly={readOnly}");
   });
 

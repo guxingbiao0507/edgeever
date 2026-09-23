@@ -5,6 +5,12 @@ import {
   type ExtensionSettings,
 } from "./extension";
 import { t } from "./i18n";
+import {
+  isMemoTitleTooLongApiError,
+  LEGACY_MEMO_TITLE_MAX_LENGTH,
+  MAX_MEMO_TITLE_LENGTH,
+  normalizeMemoTitleForApi,
+} from "./memo-title-limits";
 
 type CapturedPage = {
   title: string;
@@ -48,15 +54,42 @@ const createMemo = async (settings: ExtensionSettings, page: CapturedPage) => {
     throw new Error(t("noAvailableNotebooks"));
   }
 
-  await edgeEverRequest(settings, "/api/v1/memos", {
-    method: "POST",
-    body: JSON.stringify({
-      notebookId,
-      title: page.title,
-      contentMarkdown: toMarkdown(page),
-      tags: ["web-clip"],
-    }),
-  });
+  const fallbackTitle = (() => {
+    try {
+      return new URL(page.url).hostname;
+    } catch {
+      return t("extensionName");
+    }
+  })();
+  const markdown = toMarkdown(page);
+  let title = normalizeMemoTitleForApi(page.title, fallbackTitle, MAX_MEMO_TITLE_LENGTH);
+  const payload = {
+    notebookId,
+    title,
+    contentMarkdown: markdown,
+    tags: ["web-clip"],
+  };
+
+  try {
+    await edgeEverRequest(settings, "/api/v1/memos", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (
+      title.length > LEGACY_MEMO_TITLE_MAX_LENGTH
+      && isMemoTitleTooLongApiError(message)
+    ) {
+      title = normalizeMemoTitleForApi(page.title, fallbackTitle, LEGACY_MEMO_TITLE_MAX_LENGTH);
+      await edgeEverRequest(settings, "/api/v1/memos", {
+        method: "POST",
+        body: JSON.stringify({ ...payload, title }),
+      });
+      return;
+    }
+    throw error;
+  }
 };
 
 let pendingCapture: ((page: CapturedPage) => void) | null = null;
