@@ -52,6 +52,8 @@ const repairMislinkedResourceUrls = (markdown) => {
 };
 
 const NON_IMAGE_PATH = /\.(?:html?|php|asp|aspx|jsp|htm)(\?|#|$)/i;
+const DATA_IMAGE_PREFIX = /^data:image\//i;
+const LAZY_SRC_ATTRS = ["data-src", "data-original", "data-lazy-src", "data-url", "data-actualsrc"];
 
 const looksLikeNonImageUrl = (url) => {
   try {
@@ -89,6 +91,84 @@ const repairBrokenLinkWrappedImages = (markdown) => {
       return finalize(alt, imgUrl, page, imgUrl);
     },
   );
+
+  return next;
+};
+
+const isDataImageUrl = (value) => DATA_IMAGE_PREFIX.test(String(value || "").trim());
+
+const readHtmlAttr = (attrs, name) => {
+  const match = attrs.match(new RegExp(`\\b${name}\\s*=\\s*(["'])([^"']*)\\1`, "i"));
+  return match ? match[2] : "";
+};
+
+const parseDataImageUrl = (dataUrl) => {
+  const trimmed = String(dataUrl || "").trim();
+  const headerMatch = trimmed.match(/^data:(image\/[^;,]+)(?:;charset=[^;,]+)?(?:;(base64))?,(.*)$/is);
+  if (!headerMatch) return null;
+  const mimeType = headerMatch[1].toLowerCase();
+  const isBase64 = Boolean(headerMatch[2]);
+  const payload = headerMatch[3];
+  try {
+    let bytes;
+    if (isBase64) {
+      const binary = atob(payload.replace(/\s/g, ""));
+      bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    } else {
+      bytes = new TextEncoder().encode(decodeURIComponent(payload));
+    }
+    if (!bytes.byteLength) return null;
+    if (bytes.byteLength > MAX_PUBLIC_BYTES) throw new Error(`Image exceeds ${MAX_PUBLIC_BYTES} bytes`);
+    return { buffer: bytes.buffer, mimeType };
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("exceeds")) throw error;
+    return null;
+  }
+};
+
+const isIgnorablePlaceholderDataImage = (buffer, mimeType) => {
+  if (!buffer?.byteLength || buffer.byteLength > 4096) return false;
+  const lowerMime = (mimeType || "").toLowerCase();
+  if (!lowerMime.includes("svg")) return buffer.byteLength < 120;
+  const text = new TextDecoder().decode(new Uint8Array(buffer).slice(0, 2500)).toLowerCase();
+  const tiny =
+    /width=['"]1(px)?['"]/.test(text)
+    && /height=['"]1(px)?['"]/.test(text);
+  const hidden =
+    /fill-opacity=['"]0['"]/.test(text)
+    || /opacity=['"]0['"]/.test(text)
+    || /viewbox=['"]0 0 1 1['"]/.test(text);
+  return tiny || (hidden && buffer.byteLength < 2800);
+};
+
+const isIgnorableDataImageUrl = (dataUrl) => {
+  const parsed = parseDataImageUrl(dataUrl);
+  if (!parsed) return false;
+  return isIgnorablePlaceholderDataImage(parsed.buffer, parsed.mimeType);
+};
+
+/** Promote lazy-load real URLs; drop 1×1 data: SVG placeholders. */
+const prepareDataAndLazyImages = (markdown) => {
+  let next = markdown || "";
+
+  next = next.replace(/<img\b([^>]*?)>/gi, (full, attrs) => {
+    const src = readHtmlAttr(attrs, "src");
+    const lazy = LAZY_SRC_ATTRS.map((name) => readHtmlAttr(attrs, name)).find((value) => /^https?:\/\//i.test(value));
+    if (lazy) {
+      const alt = readHtmlAttr(attrs, "alt");
+      if (!src || isDataImageUrl(src) || isIgnorableDataImageUrl(src)) {
+        return `\n\n![${alt}](${lazy})\n\n`;
+      }
+    }
+    if (isDataImageUrl(src) && isIgnorableDataImageUrl(src)) return "";
+    return full;
+  });
+
+  next = next.replace(/!\[([^\]]*)\]\((data:image[^)\s]+)\)/gi, (full, alt, dataUrl) => {
+    if (isIgnorableDataImageUrl(dataUrl)) return "";
+    return full;
+  });
 
   return next;
 };
@@ -171,7 +251,43 @@ const collectExternalImages = (markdown) => {
   return items;
 };
 
+const collectDataImages = (markdown) => {
+  const items = [];
+  const seenRaw = new Set();
+  const md = markdown || "";
+
+  const pushData = (raw) => {
+    const trimmed = raw.trim();
+    if (!trimmed || seenRaw.has(trimmed) || !isDataImageUrl(trimmed)) return;
+    if (isIgnorableDataImageUrl(trimmed)) return;
+    seenRaw.add(trimmed);
+    items.push({ raw: trimmed, normalized: trimmed, source: "data" });
+  };
+
+  const markdownPattern = /!\[[^\]]*\]\((data:image[^)\s]+)\)/gi;
+  let match = markdownPattern.exec(md);
+  while (match) {
+    pushData(match[1]);
+    match = markdownPattern.exec(md);
+  }
+  const htmlPattern = /<img\b[^>]*\bsrc=["'](data:image[^"']+)["'][^>]*>/gi;
+  match = htmlPattern.exec(md);
+  while (match) {
+    pushData(match[1]);
+    match = htmlPattern.exec(md);
+  }
+  return items;
+};
+
 const filenameFromUrl = (url) => {
+  if (isDataImageUrl(url)) {
+    const parsed = parseDataImageUrl(url);
+    if (parsed?.mimeType.includes("png")) return "embedded.png";
+    if (parsed?.mimeType.includes("gif")) return "embedded.gif";
+    if (parsed?.mimeType.includes("webp")) return "embedded.webp";
+    if (parsed?.mimeType.includes("svg")) return "embedded.svg";
+    return "embedded.jpg";
+  }
   try {
     const pathname = new URL(url).pathname;
     const base = pathname.split("/").pop() || "image";
@@ -361,7 +477,29 @@ const applyLocalizedImage = (markdown, raw, localUrl, originalUrl, keepOriginalL
       `$1${localUrl}$2${keepOriginalLink && originalUrl ? `\n\n[原图](${originalUrl})` : ""}`,
     );
   }
+  if (raw.startsWith("data:") && markdown.includes(raw)) {
+    return markdown.split(raw).join(localUrl);
+  }
   return markdown;
+};
+
+const loadImageBytes = async (context, item) => {
+  if (item.source === "data") {
+    const parsed = parseDataImageUrl(item.normalized);
+    if (!parsed) throw new Error("Invalid data: image URL");
+    let { buffer, mimeType } = parsed;
+    if (!SUPPORTED_IMAGE_MIME.has(mimeType) && !mimeType.includes("svg")) {
+      throw new Error(`Unsupported type ${mimeType || "unknown"}`);
+    }
+    if (mimeType.includes("svg")) {
+      const text = new TextDecoder().decode(new Uint8Array(buffer).slice(0, 500)).toLowerCase();
+      if (text.includes("<svg") && isIgnorablePlaceholderDataImage(buffer, mimeType)) {
+        throw new Error("Tracking pixel SVG skipped");
+      }
+    }
+    return { buffer, mimeType: mimeType.includes("svg") ? "image/svg+xml" : mimeType };
+  }
+  return downloadImage(context, item.normalized);
 };
 
 const localizeNoteImages = async (context, noteId, options = {}) => {
@@ -370,29 +508,37 @@ const localizeNoteImages = async (context, noteId, options = {}) => {
   const stats = { scanned: 0, uploaded: 0, skipped: 0, failed: 0, repaired: 0, updated: false, samples: [] };
   const note = await context.notes.get(noteId);
   let markdown = note.contentMarkdown || "";
-  const repaired = repairBrokenLinkWrappedImages(repairMislinkedResourceUrls(markdown));
-  if (repaired !== markdown) {
-    markdown = repaired;
+  const prepared = prepareDataAndLazyImages(
+    repairBrokenLinkWrappedImages(repairMislinkedResourceUrls(markdown)),
+  );
+  if (prepared !== markdown) {
+    markdown = prepared;
     stats.repaired += 1;
   }
-  const images = collectExternalImages(markdown);
+  const images = [
+    ...collectExternalImages(markdown).map((item) => ({ ...item, source: "http" })),
+    ...collectDataImages(markdown),
+  ];
   stats.scanned = images.length;
   if (!images.length && !stats.repaired) return stats;
 
   const cache = await readUrlCache(context);
   let budget = maxImages;
 
-  for (const { raw, normalized } of images) {
+  for (const item of images) {
+    const { raw, normalized } = item;
     if (budget <= 0) {
       stats.skipped += 1;
       continue;
     }
-    const cacheKey = `${noteId}\u0000${normalized}`;
+    const cacheKey = `${noteId}\u0000${item.source}\u0000${normalized.slice(0, 120)}\u0000${normalized.length}`;
     let localUrl = cache[cacheKey];
     if (!localUrl) {
       try {
-        let { buffer, mimeType } = await downloadImage(context, normalized);
-        ({ buffer, mimeType } = await compressImageIfNeeded(buffer, mimeType, settings));
+        let { buffer, mimeType } = await loadImageBytes(context, item);
+        if (!mimeType.includes("svg")) {
+          ({ buffer, mimeType } = await compressImageIfNeeded(buffer, mimeType, settings));
+        }
         const file = new File([buffer], filenameFromUrl(normalized), { type: mimeType });
         const resource = await context.resources.upload(noteId, file);
         localUrl = resource.url;
@@ -414,7 +560,7 @@ const localizeNoteImages = async (context, noteId, options = {}) => {
       raw,
       localUrl,
       normalized,
-      settings.keepOriginalLink,
+      item.source === "data" ? false : settings.keepOriginalLink,
     );
   }
 

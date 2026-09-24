@@ -17,6 +17,8 @@ Mis-resolved resource URLs like `https://github.com/api/v1/resources/…/blob` a
 
 Link-wrapped clip images `[![alt](img)](page)` are rewritten as a whole so optional **[原图]** lines do not break the outer link (which otherwise shows as a stray `![` file chip plus `](page)`). Already broken notes are repaired on the next sync. `.html` page URLs are not treated as images.
 
+Lazy-load placeholders (`data:image/svg+xml` 1×1 tracking pixels) are removed when `data-src` / `data-original` points at a real HTTPS image. Embedded non-placeholder `data:image/…;base64,…` blobs are uploaded to R2 like remote images.
+
 ## Install
 
 1. In EdgeEver **Plugin Marketplace** or **Settings → Plugins**, choose install from manifest URL.

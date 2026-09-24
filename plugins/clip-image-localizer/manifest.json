@@ -2,7 +2,7 @@
   "type": "plugin",
   "id": "org.edgeever.clip-image-localizer",
   "name": "Clip Image Localizer",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "apiVersion": "2",
   "settingsUi": "host",
   "description": "Downloads external images in clipped notes into your EdgeEver R2 storage and rewrites Markdown to local resource URLs. Manual sync plus optional daily schedule (desktop).",
