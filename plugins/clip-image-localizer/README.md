@@ -11,7 +11,11 @@ Downloads **external images** referenced in clipped notes into your EdgeEver ins
   - **Web**: about once per 24h while EdgeEver stays open.
 - **Optional**: localize images in the background when a new clipped note is created.
 
-Public-network downloads are capped at about **2 MB** per image (EdgeEver plugin policy).
+Public-network downloads are capped at about **2 MB** per image. Larger downloads can be resized/re-encoded as JPEG before upload (see **Compress when larger than** / **Max image edge**). Optionally append an **[原图](original-url)** link under each localized image.
+
+Mis-resolved resource URLs like `https://github.com/api/v1/resources/…/blob` are repaired to `/api/v1/resources/…/blob` before sync.
+
+Link-wrapped clip images `[![alt](img)](page)` are rewritten as a whole so optional **[原图]** lines do not break the outer link (which otherwise shows as a stray `![` file chip plus `](page)`). Already broken notes are repaired on the next sync. `.html` page URLs are not treated as images.
 
 ## Install
 

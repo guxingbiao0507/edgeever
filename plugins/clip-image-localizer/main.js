@@ -16,6 +16,7 @@ const SUPPORTED_IMAGE_MIME = new Set([
   "image/avif",
 ]);
 const FETCH_ACCEPT = "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8";
+const RESOURCE_BLOB_PATH = /\/api\/v1\/resources\/([A-Za-z0-9_]+)\/blob/i;
 
 const decodeHtmlEntities = (value) => value
   .replace(/&amp;/gi, "&")
@@ -34,12 +35,74 @@ const extractPageBaseUrl = (markdown) => {
   return any?.[1];
 };
 
+const toRelativeResourceUrl = (raw) => {
+  const value = String(raw || "").trim();
+  if (value.startsWith("/api/v1/resources/")) return value;
+  const match = value.match(RESOURCE_BLOB_PATH);
+  return match ? `/api/v1/resources/${match[1]}/blob` : null;
+};
+
+const repairMislinkedResourceUrls = (markdown) => {
+  let next = markdown || "";
+  next = next.replace(
+    /https?:\/\/[^/)\s"']+\/api\/v1\/resources\/([A-Za-z0-9_]+)\/blob/gi,
+    "/api/v1/resources/$1/blob",
+  );
+  return next;
+};
+
+const NON_IMAGE_PATH = /\.(?:html?|php|asp|aspx|jsp|htm)(\?|#|$)/i;
+
+const looksLikeNonImageUrl = (url) => {
+  try {
+    return NON_IMAGE_PATH.test(new URL(url).pathname);
+  } catch {
+    return NON_IMAGE_PATH.test(url);
+  }
+};
+
+/** Fixes clip patterns like `[![alt](img)](page)` broken by inner image replacement. */
+const repairBrokenLinkWrappedImages = (markdown) => {
+  let next = markdown || "";
+  const finalize = (alt, localUrl, pageUrl, originalUrl) => {
+    let out = `![${alt}](${localUrl})`;
+    if (originalUrl && originalUrl !== localUrl) out += `\n\n[原图](${originalUrl})`;
+    if (pageUrl && pageUrl !== localUrl && pageUrl !== originalUrl) out += `\n\n[链接](${pageUrl})`;
+    return out;
+  };
+
+  next = next.replace(
+    /\[\s*\!\[([^\]]*)\]\((\/api\/v1\/resources\/[^)\s]+)\)\s*(?:\n+\[原图\]\([^)]+\))?\s*\n?\]\(([^)]+)\)/g,
+    (_, alt, local, page) => finalize(alt, local, page, ""),
+  );
+
+  next = next.replace(
+    /\[\s*\!\[([^\]]*)\]\(([^)\s]+)\)\s*\n+\[原图\]\(([^)]+)\)\s*\]\(([^)]+)\)/g,
+    (_, alt, imgUrl, originalUrl, page) => finalize(alt, imgUrl, page, originalUrl),
+  );
+
+  next = next.replace(
+    /\[\s*\!\[([^\]]*)\]\(([^)\s]+)\)\s*\]\(([^)]+)\)/g,
+    (_, alt, imgUrl, page) => {
+      if (!RESOURCE_BLOB_PATH.test(imgUrl) && !/^https?:\/\//i.test(imgUrl)) return _;
+      if (imgUrl === page) return `![${alt}](${imgUrl})`;
+      return finalize(alt, imgUrl, page, imgUrl);
+    },
+  );
+
+  return next;
+};
+
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 const normalizeImageUrl = (raw, pageBaseUrl) => {
   let value = decodeHtmlEntities(String(raw || "").trim().replace(/^<|>$/g, ""));
   if (!value) return "";
+  const relativeResource = toRelativeResourceUrl(value);
+  if (relativeResource) return relativeResource;
   if (value.startsWith("//")) value = `https:${value}`;
   try {
-    if (pageBaseUrl && !/^https?:\/\//i.test(value)) {
+    if (pageBaseUrl && !/^https?:\/\//i.test(value) && !value.startsWith("/api/")) {
       value = new URL(value, pageBaseUrl).href;
     }
     const parsed = new URL(value);
@@ -56,9 +119,12 @@ const normalizeImageUrl = (raw, pageBaseUrl) => {
 const isExternalImageUrl = (raw) => {
   const src = raw.trim();
   if (!src) return false;
+  if (toRelativeResourceUrl(src)) return false;
   if (INTERNAL_IMAGE_PREFIXES.some((prefix) => src.startsWith(prefix))) return false;
+  if (RESOURCE_BLOB_PATH.test(src)) return false;
   try {
     const parsed = new URL(src);
+    if (RESOURCE_BLOB_PATH.test(parsed.pathname)) return false;
     return parsed.protocol === "http:" || parsed.protocol === "https:";
   } catch {
     return false;
@@ -85,6 +151,7 @@ const collectExternalImages = (markdown) => {
     if (!trimmed || seenRaw.has(trimmed)) return;
     const normalized = normalizeImageUrl(trimmed, pageBaseUrl);
     if (!isExternalImageUrl(normalized)) return;
+    if (looksLikeNonImageUrl(normalized)) return;
     seenRaw.add(trimmed);
     items.push({ raw: trimmed, normalized });
   };
@@ -138,6 +205,9 @@ const readSettings = async (context) => ({
   dailyCron: String((await context.settings.get("daily-cron")) || "0 3 * * *").trim() || "0 3 * * *",
   maxImagesPerRun: Math.min(Math.max(Number(await context.settings.get("max-images-per-run")) || 80, 1), 500),
   localizeOnClip: (await context.settings.get("localize-on-clip")) === true,
+  compressOverKb: Math.min(Math.max(Number(await context.settings.get("compress-over-kb")) || 600, 64), 1900),
+  maxEdgePx: Math.min(Math.max(Number(await context.settings.get("max-edge-px")) || 2048, 640), 4096),
+  keepOriginalLink: (await context.settings.get("keep-original-link")) !== false,
 });
 
 const readUrlCache = async (context) => {
@@ -203,14 +273,111 @@ const downloadImage = async (context, url) => {
   throw lastError ?? new Error("Download failed");
 };
 
+const compressImageIfNeeded = async (buffer, mimeType, settings) => {
+  const thresholdBytes = settings.compressOverKb * 1024;
+  if (buffer.byteLength <= thresholdBytes && buffer.byteLength <= MAX_PUBLIC_BYTES) {
+    return { buffer, mimeType };
+  }
+  if (mimeType === "image/gif") {
+    if (buffer.byteLength <= MAX_PUBLIC_BYTES) return { buffer, mimeType };
+    throw new Error("Animated GIF exceeds size limit; compress manually");
+  }
+  if (typeof createImageBitmap !== "function" || typeof document === "undefined") {
+    if (buffer.byteLength <= MAX_PUBLIC_BYTES) return { buffer, mimeType };
+    throw new Error(`Image exceeds ${MAX_PUBLIC_BYTES} bytes`);
+  }
+  const bitmap = await createImageBitmap(new Blob([buffer], { type: mimeType }));
+  let width = bitmap.width;
+  let height = bitmap.height;
+  const maxEdge = settings.maxEdgePx;
+  if (width > maxEdge || height > maxEdge) {
+    if (width >= height) {
+      height = Math.round((height * maxEdge) / width);
+      width = maxEdge;
+    } else {
+      width = Math.round((width * maxEdge) / height);
+      height = maxEdge;
+    }
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    bitmap.close();
+    throw new Error("Canvas is unavailable for compression");
+  }
+  ctx.drawImage(bitmap, 0, 0, width, height);
+  bitmap.close();
+  const outputType = "image/jpeg";
+  const qualities = [0.9, 0.82, 0.74, 0.66, 0.58];
+  let best = null;
+  for (const quality of qualities) {
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, outputType, quality));
+    if (!blob) continue;
+    if (!best || blob.size < best.size) best = { blob, mimeType: outputType };
+    if (blob.size <= thresholdBytes && blob.size <= MAX_PUBLIC_BYTES) break;
+  }
+  if (!best) throw new Error("Compression failed");
+  const outBuffer = await best.blob.arrayBuffer();
+  if (outBuffer.byteLength > MAX_PUBLIC_BYTES) {
+    throw new Error(`Image still exceeds ${MAX_PUBLIC_BYTES} bytes after compression`);
+  }
+  return { buffer: outBuffer, mimeType: best.mimeType };
+};
+
+const buildLocalizedImageBlock = (alt, localUrl, originalUrl, keepOriginalLink, outerHref) => {
+  let out = `![${alt}](${localUrl})`;
+  if (keepOriginalLink && originalUrl && originalUrl !== localUrl) out += `\n\n[原图](${originalUrl})`;
+  if (outerHref && outerHref !== originalUrl && outerHref !== localUrl) out += `\n\n[链接](${outerHref})`;
+  return out;
+};
+
+const applyLocalizedImage = (markdown, raw, localUrl, originalUrl, keepOriginalLink) => {
+  const escaped = escapeRegExp(raw);
+  const linkWrapped = new RegExp(
+    `\\[\\s*(\\!\\[([^\\]]*)\\]\\(${escaped}(?:\\s+"[^"]*")?\\))\\s*\\]\\(([^)\\s]+)(?:\\s+"[^"]*")?\\)`,
+    "g",
+  );
+  if (linkWrapped.test(markdown)) {
+    linkWrapped.lastIndex = 0;
+    return markdown.replace(linkWrapped, (_, _inner, alt, outerHref) =>
+      buildLocalizedImageBlock(alt, localUrl, originalUrl, keepOriginalLink, outerHref),
+    );
+  }
+
+  const markdownImage = new RegExp(`!\\[([^\\]]*)\\]\\(${escaped}(?:\\s+"[^"]*")?\\)`, "g");
+  if (markdownImage.test(markdown)) {
+    markdownImage.lastIndex = 0;
+    return markdown.replace(markdownImage, (_, alt) =>
+      buildLocalizedImageBlock(alt, localUrl, originalUrl, keepOriginalLink, ""),
+    );
+  }
+  const htmlImage = new RegExp(`(<img\\b[^>]*\\bsrc=["'])${escaped}(["'][^>]*>)`, "gi");
+  if (htmlImage.test(markdown)) {
+    htmlImage.lastIndex = 0;
+    return markdown.replace(
+      htmlImage,
+      `$1${localUrl}$2${keepOriginalLink && originalUrl ? `\n\n[原图](${originalUrl})` : ""}`,
+    );
+  }
+  return markdown;
+};
+
 const localizeNoteImages = async (context, noteId, options = {}) => {
-  const { maxImages = 80, quiet = false } = options;
-  const stats = { scanned: 0, uploaded: 0, skipped: 0, failed: 0, updated: false, samples: [] };
+  const settings = options.settings ?? await readSettings(context);
+  const { maxImages = settings.maxImagesPerRun, quiet = false } = options;
+  const stats = { scanned: 0, uploaded: 0, skipped: 0, failed: 0, repaired: 0, updated: false, samples: [] };
   const note = await context.notes.get(noteId);
   let markdown = note.contentMarkdown || "";
+  const repaired = repairBrokenLinkWrappedImages(repairMislinkedResourceUrls(markdown));
+  if (repaired !== markdown) {
+    markdown = repaired;
+    stats.repaired += 1;
+  }
   const images = collectExternalImages(markdown);
   stats.scanned = images.length;
-  if (!images.length) return stats;
+  if (!images.length && !stats.repaired) return stats;
 
   const cache = await readUrlCache(context);
   let budget = maxImages;
@@ -224,7 +391,8 @@ const localizeNoteImages = async (context, noteId, options = {}) => {
     let localUrl = cache[cacheKey];
     if (!localUrl) {
       try {
-        const { buffer, mimeType } = await downloadImage(context, normalized);
+        let { buffer, mimeType } = await downloadImage(context, normalized);
+        ({ buffer, mimeType } = await compressImageIfNeeded(buffer, mimeType, settings));
         const file = new File([buffer], filenameFromUrl(normalized), { type: mimeType });
         const resource = await context.resources.upload(noteId, file);
         localUrl = resource.url;
@@ -241,9 +409,13 @@ const localizeNoteImages = async (context, noteId, options = {}) => {
     } else {
       stats.skipped += 1;
     }
-    if (markdown.includes(raw)) {
-      markdown = markdown.split(raw).join(localUrl);
-    }
+    markdown = applyLocalizedImage(
+      markdown,
+      raw,
+      localUrl,
+      normalized,
+      settings.keepOriginalLink,
+    );
   }
 
   if (markdown !== note.contentMarkdown) {
@@ -282,6 +454,7 @@ const runBatchSync = async (context, options = {}) => {
     for (const summary of page.notes) {
       totals.notes += 1;
       const stats = await localizeNoteImages(context, summary.id, {
+        settings,
         maxImages: settings.maxImagesPerRun,
         quiet: true,
       });
@@ -344,8 +517,10 @@ export default {
             context.ui.showNotice("Open a note in the editor first.");
             return;
           }
+          const currentSettings = await readSettings(context);
           const stats = await localizeNoteImages(context, doc.noteId, {
-            maxImages: (await readSettings(context)).maxImagesPerRun,
+            settings: currentSettings,
+            maxImages: currentSettings.maxImagesPerRun,
             quiet: false,
           });
           if (stats.updated) {
@@ -367,7 +542,14 @@ export default {
     if (settings.localizeOnClip) {
       context.events.on("note.created", async ({ note }) => {
         if (!note?.tags?.includes(settings.clipTag)) return;
-        await guardRun(() => localizeNoteImages(context, note.id, { maxImages: settings.maxImagesPerRun, quiet: true }));
+        await guardRun(async () => {
+          const currentSettings = await readSettings(context);
+          return localizeNoteImages(context, note.id, {
+            settings: currentSettings,
+            maxImages: currentSettings.maxImagesPerRun,
+            quiet: true,
+          });
+        });
       });
     }
 

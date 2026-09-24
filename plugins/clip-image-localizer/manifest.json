@@ -2,7 +2,7 @@
   "type": "plugin",
   "id": "org.edgeever.clip-image-localizer",
   "name": "Clip Image Localizer",
-  "version": "1.0.2",
+  "version": "1.0.4",
   "apiVersion": "2",
   "settingsUi": "host",
   "description": "Downloads external images in clipped notes into your EdgeEver R2 storage and rewrites Markdown to local resource URLs. Manual sync plus optional daily schedule (desktop).",
@@ -54,6 +54,27 @@
         "label": "Localize after new web clip",
         "description": "When a note is created with the clip tag, localize its images in the background.",
         "default": false
+      },
+      {
+        "key": "compress-over-kb",
+        "type": "number",
+        "label": "Compress when larger than (KB)",
+        "description": "Images above this size are resized and re-encoded before upload (max edge also applies).",
+        "default": 600
+      },
+      {
+        "key": "max-edge-px",
+        "type": "number",
+        "label": "Max image edge (px)",
+        "description": "Longest side after compression resize.",
+        "default": 2048
+      },
+      {
+        "key": "keep-original-link",
+        "type": "boolean",
+        "label": "Keep original image link",
+        "description": "Add a [原图](url) link under each localized image.",
+        "default": true
       }
     ]
   }
