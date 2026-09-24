@@ -63,11 +63,11 @@ const guessMime = (url, headerType) => {
 };
 
 const readSettings = async (context) => ({
-  clipTag: String((await context.settings.get("clipTag")) || "web-clip").trim() || "web-clip",
-  autoSyncDaily: (await context.settings.get("autoSyncDaily")) !== false,
-  dailyCron: String((await context.settings.get("dailyCron")) || "0 3 * * *").trim() || "0 3 * * *",
-  maxImagesPerRun: Math.min(Math.max(Number(await context.settings.get("maxImagesPerRun")) || 80, 1), 500),
-  localizeOnClip: (await context.settings.get("localizeOnClip")) === true,
+  clipTag: String((await context.settings.get("clip-tag")) || "web-clip").trim() || "web-clip",
+  autoSyncDaily: (await context.settings.get("auto-sync-daily")) !== false,
+  dailyCron: String((await context.settings.get("daily-cron")) || "0 3 * * *").trim() || "0 3 * * *",
+  maxImagesPerRun: Math.min(Math.max(Number(await context.settings.get("max-images-per-run")) || 80, 1), 500),
+  localizeOnClip: (await context.settings.get("localize-on-clip")) === true,
 });
 
 const readUrlCache = async (context) => {

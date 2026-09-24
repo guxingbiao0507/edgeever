@@ -95,7 +95,7 @@
     },
     "apps/desktop": {
       "name": "@edgeever/desktop",
-      "version": "1.67.0",
+      "version": "1.77.0",
       "dependencies": {
         "@edgeever/public-network": "workspace:*",
         "croner": "^10.0.1",
@@ -235,7 +235,11 @@
       "name": "@edgeever/client",
       "version": "0.1.3",
       "dependencies": {
+        "@ai-sdk/anthropic": "^4.0.36",
+        "@ai-sdk/google": "^4.0.39",
+        "@ai-sdk/openai-compatible": "^3.0.27",
         "@edgeever/shared": "workspace:*",
+        "ai": "^7.0.58",
       },
     },
     "packages/plugin-api": {
