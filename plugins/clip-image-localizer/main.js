@@ -8,35 +8,100 @@ const INTERNAL_IMAGE_PREFIXES = [
 const MAX_PUBLIC_BYTES = 2_000_000;
 const STORAGE_LAST_AUTO = "lastAutoSyncAt";
 const STORAGE_URL_CACHE = "urlResourceCache";
+const SUPPORTED_IMAGE_MIME = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "image/avif",
+]);
+const FETCH_ACCEPT = "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8";
+
+const decodeHtmlEntities = (value) => value
+  .replace(/&amp;/gi, "&")
+  .replace(/&quot;/gi, "\"")
+  .replace(/&#39;/gi, "'")
+  .replace(/&lt;/gi, "<")
+  .replace(/&gt;/gi, ">");
+
+const extractPageBaseUrl = (markdown) => {
+  const md = markdown || "";
+  const labeled = md.match(/(?:来源|Source)[：:]\s*\[[^\]]*\]\((https?:\/\/[^)\s]+)\)/i);
+  if (labeled?.[1]) return labeled[1];
+  const earlyLink = md.match(/^#[^\n]+\n+\[[^\]]*\]\((https?:\/\/[^)\s]+)\)/m);
+  if (earlyLink?.[1]) return earlyLink[1];
+  const any = md.match(/\((https?:\/\/[^)\s]+)\)/);
+  return any?.[1];
+};
+
+const normalizeImageUrl = (raw, pageBaseUrl) => {
+  let value = decodeHtmlEntities(String(raw || "").trim().replace(/^<|>$/g, ""));
+  if (!value) return "";
+  if (value.startsWith("//")) value = `https:${value}`;
+  try {
+    if (pageBaseUrl && !/^https?:\/\//i.test(value)) {
+      value = new URL(value, pageBaseUrl).href;
+    }
+    const parsed = new URL(value);
+    if (parsed.protocol === "http:") {
+      parsed.protocol = "https:";
+      value = parsed.href;
+    }
+    return parsed.protocol === "https:" || parsed.protocol === "http:" ? value : "";
+  } catch {
+    return "";
+  }
+};
 
 const isExternalImageUrl = (raw) => {
-  const src = raw.trim().replace(/^<|>$/g, "");
+  const src = raw.trim();
   if (!src) return false;
   if (INTERNAL_IMAGE_PREFIXES.some((prefix) => src.startsWith(prefix))) return false;
   try {
-    const parsed = new URL(src, "https://edgeever.invalid");
+    const parsed = new URL(src);
     return parsed.protocol === "http:" || parsed.protocol === "https:";
   } catch {
     return false;
   }
 };
 
-const collectExternalImageUrls = (markdown) => {
-  const urls = new Set();
+const canUsePublicTransport = (url) => {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" && (!parsed.port || parsed.port === "443");
+  } catch {
+    return false;
+  }
+};
+
+const collectExternalImages = (markdown) => {
+  const pageBaseUrl = extractPageBaseUrl(markdown);
   const md = markdown || "";
+  const items = [];
+  const seenRaw = new Set();
+
+  const pushMatch = (raw) => {
+    const trimmed = raw.trim().replace(/^<|>$/g, "");
+    if (!trimmed || seenRaw.has(trimmed)) return;
+    const normalized = normalizeImageUrl(trimmed, pageBaseUrl);
+    if (!isExternalImageUrl(normalized)) return;
+    seenRaw.add(trimmed);
+    items.push({ raw: trimmed, normalized });
+  };
+
   const markdownPattern = /!\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
   let match = markdownPattern.exec(md);
   while (match) {
-    if (isExternalImageUrl(match[1])) urls.add(match[1].trim().replace(/^<|>$/g, ""));
+    pushMatch(match[1]);
     match = markdownPattern.exec(md);
   }
   const htmlPattern = /<img\b[^>]*\bsrc=["']([^"']+)["'][^>]*>/gi;
   match = htmlPattern.exec(md);
   while (match) {
-    if (isExternalImageUrl(match[1])) urls.add(match[1].trim());
+    pushMatch(match[1]);
     match = htmlPattern.exec(md);
   }
-  return [...urls];
+  return items;
 };
 
 const filenameFromUrl = (url) => {
@@ -44,21 +109,26 @@ const filenameFromUrl = (url) => {
     const pathname = new URL(url).pathname;
     const base = pathname.split("/").pop() || "image";
     const cleaned = base.replace(/[^\w.\-()+]/g, "_").slice(0, 120);
-    if (/\.(png|jpe?g|gif|webp|svg|avif|bmp)$/i.test(cleaned)) return cleaned;
+    if (/\.(png|jpe?g|gif|webp|avif|bmp)$/i.test(cleaned)) return cleaned;
     return `${cleaned || "image"}.jpg`;
   } catch {
     return "image.jpg";
   }
 };
 
-const guessMime = (url, headerType) => {
+const sniffImageMime = (buffer, url, headerType) => {
   const type = (headerType || "").split(";")[0].trim().toLowerCase();
-  if (type.startsWith("image/")) return type;
+  if (SUPPORTED_IMAGE_MIME.has(type)) return type;
+  const bytes = new Uint8Array(buffer);
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return "image/png";
+  if (bytes.length >= 6 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) return "image/gif";
+  if (bytes.length >= 12 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46) return "image/webp";
   const lower = url.toLowerCase();
   if (lower.includes(".png")) return "image/png";
   if (lower.includes(".webp")) return "image/webp";
   if (lower.includes(".gif")) return "image/gif";
-  if (lower.includes(".svg")) return "image/svg+xml";
+  if (lower.includes(".avif")) return "image/avif";
   return "image/jpeg";
 };
 
@@ -80,21 +150,35 @@ const writeUrlCache = async (context, cache) => {
   await context.storage.set(STORAGE_URL_CACHE, cache);
 };
 
+const fetchImageResponse = async (context, startUrl, transport) => {
+  let url = startUrl;
+  for (let hop = 0; hop < 8; hop += 1) {
+    const response = await context.network.fetch(url, {
+      transport,
+      method: "GET",
+      credentials: "omit",
+      redirect: "manual",
+      headers: { Accept: FETCH_ACCEPT },
+    });
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get("location") || response.headers.get("Location");
+      if (!location) throw new Error(`HTTP ${response.status} redirect without Location`);
+      url = new URL(location, url).href;
+      continue;
+    }
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return { response, url };
+  }
+  throw new Error("Too many redirects");
+};
+
 const downloadImage = async (context, url) => {
-  const attempts = ["direct", "public"];
+  const transports = canUsePublicTransport(url) ? ["public", "direct"] : ["direct", "public"];
   let lastError = null;
-  for (const transport of attempts) {
+  for (const transport of transports) {
+    if (transport === "public" && !canUsePublicTransport(url)) continue;
     try {
-      const response = await context.network.fetch(url, {
-        transport,
-        method: "GET",
-        credentials: "omit",
-        redirect: "follow",
-      });
-      if (!response.ok) {
-        lastError = new Error(`HTTP ${response.status}`);
-        continue;
-      }
+      const { response } = await fetchImageResponse(context, url, transport);
       const buffer = await response.arrayBuffer();
       if (!buffer.byteLength) {
         lastError = new Error("Empty response");
@@ -103,11 +187,17 @@ const downloadImage = async (context, url) => {
       if (buffer.byteLength > MAX_PUBLIC_BYTES) {
         throw new Error(`Image exceeds ${MAX_PUBLIC_BYTES} bytes`);
       }
-      const mimeType = guessMime(url, response.headers.get("content-type"));
+      const mimeType = sniffImageMime(buffer, url, response.headers.get("content-type"));
+      if (!SUPPORTED_IMAGE_MIME.has(mimeType)) {
+        throw new Error(`Unsupported type ${mimeType || "unknown"}`);
+      }
+      const preview = new TextDecoder().decode(new Uint8Array(buffer).slice(0, 200)).toLowerCase();
+      if (preview.includes("<!doctype html") || preview.includes("<html")) {
+        throw new Error("Received HTML instead of an image (hotlink or auth block)");
+      }
       return { buffer, mimeType };
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
-      if (transport === "public") break;
     }
   }
   throw lastError ?? new Error("Download failed");
@@ -115,27 +205,27 @@ const downloadImage = async (context, url) => {
 
 const localizeNoteImages = async (context, noteId, options = {}) => {
   const { maxImages = 80, quiet = false } = options;
-  const stats = { scanned: 0, uploaded: 0, skipped: 0, failed: 0, updated: false };
+  const stats = { scanned: 0, uploaded: 0, skipped: 0, failed: 0, updated: false, samples: [] };
   const note = await context.notes.get(noteId);
   let markdown = note.contentMarkdown || "";
-  const urls = collectExternalImageUrls(markdown);
-  stats.scanned = urls.length;
-  if (!urls.length) return stats;
+  const images = collectExternalImages(markdown);
+  stats.scanned = images.length;
+  if (!images.length) return stats;
 
   const cache = await readUrlCache(context);
   let budget = maxImages;
 
-  for (const url of urls) {
+  for (const { raw, normalized } of images) {
     if (budget <= 0) {
       stats.skipped += 1;
       continue;
     }
-    const cacheKey = `${noteId}\u0000${url}`;
+    const cacheKey = `${noteId}\u0000${normalized}`;
     let localUrl = cache[cacheKey];
     if (!localUrl) {
       try {
-        const { buffer, mimeType } = await downloadImage(context, url);
-        const file = new File([buffer], filenameFromUrl(url), { type: mimeType });
+        const { buffer, mimeType } = await downloadImage(context, normalized);
+        const file = new File([buffer], filenameFromUrl(normalized), { type: mimeType });
         const resource = await context.resources.upload(noteId, file);
         localUrl = resource.url;
         cache[cacheKey] = localUrl;
@@ -143,16 +233,16 @@ const localizeNoteImages = async (context, noteId, options = {}) => {
         budget -= 1;
       } catch (error) {
         stats.failed += 1;
-        if (!quiet) {
-          console.warn("[clip-image-localizer]", url, error);
-        }
+        const message = error instanceof Error ? error.message : String(error);
+        if (stats.samples.length < 3) stats.samples.push(`${normalized.slice(0, 80)}: ${message}`);
+        if (!quiet) console.warn("[clip-image-localizer]", normalized, error);
         continue;
       }
     } else {
       stats.skipped += 1;
     }
-    if (markdown.includes(url)) {
-      markdown = markdown.split(url).join(localUrl);
+    if (markdown.includes(raw)) {
+      markdown = markdown.split(raw).join(localUrl);
     }
   }
 
@@ -164,11 +254,20 @@ const localizeNoteImages = async (context, noteId, options = {}) => {
   return stats;
 };
 
+const formatSyncSummary = (totals, statsSample) => {
+  const base = `Synced clip images — ${totals.updated} notes updated, ${totals.uploaded} images uploaded`;
+  if (!totals.failed) return `${base}.`;
+  const hint = "Tip: use HTTPS sources, stay under 2MB, and open DevTools (F12) for details.";
+  const sample = statsSample?.length ? ` Examples: ${statsSample.join("; ")}` : "";
+  return `${base}, ${totals.failed} failed. ${hint}${sample}`;
+};
+
 const runBatchSync = async (context, options = {}) => {
   const settings = await readSettings(context);
   const quiet = options.quiet === true;
   let offset = 0;
   let totals = { notes: 0, uploaded: 0, failed: 0, updated: 0 };
+  const failureSamples = [];
   const tag = settings.clipTag;
 
   while (true) {
@@ -184,11 +283,14 @@ const runBatchSync = async (context, options = {}) => {
       totals.notes += 1;
       const stats = await localizeNoteImages(context, summary.id, {
         maxImages: settings.maxImagesPerRun,
-        quiet,
+        quiet: true,
       });
       totals.uploaded += stats.uploaded;
       totals.failed += stats.failed;
       if (stats.updated) totals.updated += 1;
+      for (const sample of stats.samples) {
+        if (failureSamples.length < 3) failureSamples.push(sample);
+      }
     }
 
     if (page.nextOffset == null) break;
@@ -197,8 +299,8 @@ const runBatchSync = async (context, options = {}) => {
 
   const message = quiet
     ? `Image sync: ${totals.updated} notes updated, ${totals.uploaded} uploaded, ${totals.failed} failed.`
-    : `Synced clip images — ${totals.updated} notes updated, ${totals.uploaded} images uploaded${totals.failed ? `, ${totals.failed} failed` : ""}.`;
-  if (!quiet || totals.uploaded || totals.updated) {
+    : formatSyncSummary(totals, failureSamples);
+  if (!quiet || totals.uploaded || totals.updated || totals.failed) {
     context.ui.showNotice(message);
   }
   await context.storage.set(STORAGE_LAST_AUTO, String(Date.now()));
@@ -250,6 +352,11 @@ export default {
             context.ui.showNotice(`Localized ${stats.uploaded} image(s) in this note.`);
           } else if (stats.scanned === 0) {
             context.ui.showNotice("No external images found in this note.");
+          } else if (stats.failed && !stats.uploaded) {
+            context.ui.showNotice(formatSyncSummary(
+              { updated: 0, uploaded: 0, failed: stats.failed },
+              stats.samples,
+            ));
           } else {
             context.ui.showNotice(`Done — ${stats.failed ? `${stats.failed} failed, ` : ""}${stats.skipped} skipped.`);
           }
