@@ -1,0 +1,60 @@
+{
+  "type": "plugin",
+  "id": "org.edgeever.clip-image-localizer",
+  "name": "Clip Image Localizer",
+  "version": "1.0.0",
+  "apiVersion": "2",
+  "settingsUi": "host",
+  "description": "Downloads external images in clipped notes into your EdgeEver R2 storage and rewrites Markdown to local resource URLs. Manual sync plus optional daily schedule (desktop).",
+  "entry": "./main.js",
+  "platforms": ["web", "desktop"],
+  "permissions": [
+    "notes:read",
+    "notes:write",
+    "resources:write",
+    "network",
+    "network:public",
+    "storage",
+    "schedules",
+    "ui:commands",
+    "ui:notices"
+  ],
+  "settings": {
+    "fields": [
+      {
+        "key": "clipTag",
+        "type": "text",
+        "label": "Note tag to scan",
+        "description": "Only notes containing this tag are included in batch sync (default: web-clip).",
+        "default": "web-clip"
+      },
+      {
+        "key": "autoSyncDaily",
+        "type": "boolean",
+        "label": "Daily automatic sync",
+        "description": "Desktop: runs on a schedule while EdgeEver is open. Web: checks about once per day when the app stays open.",
+        "default": true
+      },
+      {
+        "key": "dailyCron",
+        "type": "text",
+        "label": "Desktop schedule (cron)",
+        "description": "Cron expression for desktop scheduled sync (UTC). Example: 0 3 * * * = 03:00 UTC daily.",
+        "default": "0 3 * * *"
+      },
+      {
+        "key": "maxImagesPerRun",
+        "type": "number",
+        "label": "Max images per run",
+        "default": 80
+      },
+      {
+        "key": "localizeOnClip",
+        "type": "boolean",
+        "label": "Localize after new web clip",
+        "description": "When a note is created with the clip tag, localize its images in the background.",
+        "default": false
+      }
+    ]
+  }
+}
