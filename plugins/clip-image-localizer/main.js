@@ -53,7 +53,24 @@ const repairMislinkedResourceUrls = (markdown) => {
 
 const NON_IMAGE_PATH = /\.(?:html?|php|asp|aspx|jsp|htm)(\?|#|$)/i;
 const DATA_IMAGE_PREFIX = /^data:image\//i;
-const LAZY_SRC_ATTRS = ["data-src", "data-original", "data-lazy-src", "data-url", "data-actualsrc"];
+const LAZY_SRC_ATTRS = [
+  "data-src",
+  "data-original",
+  "data-original-src",
+  "data-lazy-src",
+  "data-lazyload",
+  "data-lazy",
+  "data-url",
+  "data-actualsrc",
+  "data-img",
+  "data-imgurl",
+  "data-echo",
+  "data-backsrc",
+  "data-thumb",
+  "data-image",
+  "data-origin",
+];
+const ATTACHMENT_LABEL_PATTERN = /^\s*(?:附件[：:]|Attachment:)\s*/i;
 
 const looksLikeNonImageUrl = (url) => {
   try {
@@ -100,6 +117,35 @@ const isDataImageUrl = (value) => DATA_IMAGE_PREFIX.test(String(value || "").tri
 const readHtmlAttr = (attrs, name) => {
   const match = attrs.match(new RegExp(`\\b${name}\\s*=\\s*(["'])([^"']*)\\1`, "i"));
   return match ? match[2] : "";
+};
+
+const readSrcsetUrl = (attrs) => {
+  const srcset = readHtmlAttr(attrs, "srcset");
+  if (!srcset) return "";
+  const first = srcset.split(",")[0]?.trim().split(/\s+/)[0] || "";
+  return first;
+};
+
+const readBackgroundImageUrl = (attrs) => {
+  const style = readHtmlAttr(attrs, "style");
+  if (!style) return "";
+  const match = style.match(/background-image\s*:\s*url\(\s*['"]?([^'")]+)['"]?\s*\)/i);
+  return match ? match[1] : "";
+};
+
+const resolveLazyImageCandidate = (attrs, pageBaseUrl) => {
+  const candidates = [
+    ...LAZY_SRC_ATTRS.map((name) => readHtmlAttr(attrs, name)),
+    readSrcsetUrl(attrs),
+    readBackgroundImageUrl(attrs),
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    const normalized = normalizeImageUrl(candidate, pageBaseUrl);
+    if (normalized && (isExternalImageUrl(normalized) || toRelativeResourceUrl(normalized))) {
+      return normalized;
+    }
+  }
+  return "";
 };
 
 const parseDataImageUrl = (dataUrl) => {
@@ -151,15 +197,23 @@ const isIgnorableDataImageUrl = (dataUrl) => {
 /** Promote lazy-load real URLs; drop 1×1 data: SVG placeholders. */
 const prepareDataAndLazyImages = (markdown) => {
   let next = markdown || "";
+  const pageBaseUrl = extractPageBaseUrl(next);
 
   next = next.replace(/<img\b([^>]*?)>/gi, (full, attrs) => {
+    const alt = readHtmlAttr(attrs, "alt") || "image";
     const src = readHtmlAttr(attrs, "src");
-    const lazy = LAZY_SRC_ATTRS.map((name) => readHtmlAttr(attrs, name)).find((value) => /^https?:\/\//i.test(value));
-    if (lazy) {
-      const alt = readHtmlAttr(attrs, "alt");
-      if (!src || isDataImageUrl(src) || isIgnorableDataImageUrl(src)) {
-        return `\n\n![${alt}](${lazy})\n\n`;
-      }
+    const srcNorm = src ? (toRelativeResourceUrl(src) || normalizeImageUrl(src, pageBaseUrl)) : "";
+    const lazy = resolveLazyImageCandidate(attrs, pageBaseUrl);
+
+    if (lazy && (!srcNorm || isDataImageUrl(src) || isIgnorableDataImageUrl(src))) {
+      return `\n\n![${alt}](${lazy})\n\n`;
+    }
+    const resourceSrc = srcNorm && toRelativeResourceUrl(srcNorm);
+    if (resourceSrc) {
+      return `\n\n![${alt}](${resourceSrc})\n\n`;
+    }
+    if (srcNorm && isExternalImageUrl(srcNorm) && !looksLikeNonImageUrl(srcNorm)) {
+      return `\n\n![${alt}](${srcNorm})\n\n`;
     }
     if (isDataImageUrl(src) && isIgnorableDataImageUrl(src)) return "";
     return full;
@@ -171,6 +225,40 @@ const prepareDataAndLazyImages = (markdown) => {
   });
 
   return next;
+};
+
+/** EdgeEver treats `[label](/api/…/blob)` as a file chip, not an image — use `![label](…)`. */
+const promoteResourceLinksToMarkdownImages = (markdown) => {
+  let next = markdown || "";
+  next = next.replace(
+    /\[([^\]]+)\]\((\/api\/v1\/resources\/[^)\s]+\/blob)\)/g,
+    (full, label, url, offset, whole) => {
+      if (offset > 0 && whole[offset - 1] === "!") return full;
+      if (ATTACHMENT_LABEL_PATTERN.test(label)) return full;
+      return `![${label}](${url})`;
+    },
+  );
+  return next;
+};
+
+/** Re-download from [原图](https://…) when the local blob may be wrong (HTML, placeholder, etc.). */
+const collectOriginalRefreshTargets = (markdown) => {
+  const items = [];
+  const seen = new Set();
+  const pattern =
+    /!\[([^\]]*)\]\((\/api\/v1\/resources\/[^)\s]+\/blob)\)\s*(?:\n+\[[^\]]*\]\([^)]+\))*\s*\n+\[原图\]\((https?:\/\/[^)\s]+)\)/gi;
+  let match = pattern.exec(markdown || "");
+  while (match) {
+    const blobUrl = match[2];
+    const originalUrl = match[3];
+    const key = `${blobUrl}\u0000${originalUrl}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      items.push({ raw: blobUrl, normalized: originalUrl, source: "http", refresh: true });
+    }
+    match = pattern.exec(markdown || "");
+  }
+  return items;
 };
 
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -472,10 +560,20 @@ const applyLocalizedImage = (markdown, raw, localUrl, originalUrl, keepOriginalL
   const htmlImage = new RegExp(`(<img\\b[^>]*\\bsrc=["'])${escaped}(["'][^>]*>)`, "gi");
   if (htmlImage.test(markdown)) {
     htmlImage.lastIndex = 0;
-    return markdown.replace(
-      htmlImage,
-      `$1${localUrl}$2${keepOriginalLink && originalUrl ? `\n\n[原图](${originalUrl})` : ""}`,
+    return markdown.replace(htmlImage, () =>
+      buildLocalizedImageBlock("", localUrl, originalUrl, keepOriginalLink, ""),
     );
+  }
+  if (RESOURCE_BLOB_PATH.test(raw) || RESOURCE_BLOB_PATH.test(originalUrl)) {
+    const blobPath = RESOURCE_BLOB_PATH.test(raw) ? raw : originalUrl;
+    const blobEscaped = escapeRegExp(blobPath);
+    const resourceImage = new RegExp(`!\\[([^\\]]*)\\]\\(${blobEscaped}(?:\\s+"[^"]*")?\\)`, "g");
+    if (resourceImage.test(markdown)) {
+      resourceImage.lastIndex = 0;
+      return markdown.replace(resourceImage, (_, alt) =>
+        buildLocalizedImageBlock(alt, localUrl, originalUrl, keepOriginalLink, ""),
+      );
+    }
   }
   if (raw.startsWith("data:") && markdown.includes(raw)) {
     return markdown.split(raw).join(localUrl);
@@ -508,15 +606,22 @@ const localizeNoteImages = async (context, noteId, options = {}) => {
   const stats = { scanned: 0, uploaded: 0, skipped: 0, failed: 0, repaired: 0, updated: false, samples: [] };
   const note = await context.notes.get(noteId);
   let markdown = note.contentMarkdown || "";
-  const prepared = prepareDataAndLazyImages(
-    repairBrokenLinkWrappedImages(repairMislinkedResourceUrls(markdown)),
+  const prepared = promoteResourceLinksToMarkdownImages(
+    prepareDataAndLazyImages(
+      repairBrokenLinkWrappedImages(repairMislinkedResourceUrls(markdown)),
+    ),
   );
   if (prepared !== markdown) {
     markdown = prepared;
     stats.repaired += 1;
   }
+  const refreshTargets = collectOriginalRefreshTargets(markdown);
+  const refreshNormals = new Set(refreshTargets.map((item) => item.normalized));
   const images = [
-    ...collectExternalImages(markdown).map((item) => ({ ...item, source: "http" })),
+    ...refreshTargets,
+    ...collectExternalImages(markdown)
+      .filter((item) => !refreshNormals.has(item.normalized))
+      .map((item) => ({ ...item, source: "http" })),
     ...collectDataImages(markdown),
   ];
   stats.scanned = images.length;

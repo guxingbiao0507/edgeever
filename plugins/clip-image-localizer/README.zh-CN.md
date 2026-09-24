@@ -17,7 +17,9 @@
 
 页脚常见的 **`[![图标](图片)](页面)`** 可点击图会在本地化时整段改写，避免把「原图」插进外层链接导致正文出现 `![` 文件块和孤立的 `](support.html)`；已损坏的笔记在下次同步时会尝试自动修复。`.html` 等页面 URL 不会当作图片下载。
 
-剪藏里常见的 **`src="data:image/svg+xml,…"` 1×1 透明占位图** 会在同步前删除；若同一 `<img>` 带有 **`data-src` / `data-original`** 等真实 HTTPS 地址，会优先改用真实地址再下载到 R2。较大的 `data:image/png;base64,…` 等内嵌图会上传为本地资源（不再保留超长 data 链接）。
+剪藏里常见的 **`src="data:image/svg+xml,…"` 1×1 透明占位图** 会在同步前删除；若同一 `<img>` 带有 **`data-src` / `data-original` / `srcset`** 等真实地址，会优先改用真实地址再下载到 R2。较大的 `data:image/png;base64,…` 等内嵌图会上传为本地资源（不再保留超长 data 链接）。
+
+**`[文字](/api/v1/resources/…/blob)` 在 EdgeEver 里会显示成文件附件而不是图片**；同步时会自动改成 **`![文字](…/blob)`**。`<img src="…/blob">` 也会改成 Markdown 图片。若某张本地 blob 之前误传了 HTML/占位图，只要正文里仍有 **`[原图](https://…)`**，同步时会按原图重新下载并替换该 blob 地址。
 
 ## 安装
 
