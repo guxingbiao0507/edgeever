@@ -1,8 +1,5 @@
+import { createExcerpt, DEFAULT_MEMO_TITLE } from "@edgeever/shared/content-text";
 import {
-  createExcerpt,
-  DEFAULT_MEMO_TITLE,
-  docToText,
-  markdownToDoc,
   getDiagramSummary,
   type MemoSummary,
 } from "@edgeever/shared";
@@ -65,10 +62,14 @@ export const mapMemoSummary = (row: MemoSummaryRow): MemoSummary => ({
   id: row.id,
   notebookId: row.notebook_id,
   title: row.title,
+  // Prefer the stored excerpt, then the stored plain-text projection. Every write
+  // path persists content_text, so the final raw-Markdown fallback only guards
+  // degenerate/legacy rows; it stays TipTap-free so list reads never trigger the
+  // editor's cold-start initialization.
   excerpt:
     row.excerpt ||
     createExcerpt(row.content_text ?? "") ||
-    createExcerpt(docToText(markdownToDoc(row.content_markdown ?? ""))),
+    createExcerpt(row.content_markdown ?? ""),
   ...getDiagramSummary(row.content_markdown),
   tags: parseJsonArray(row.tags_json),
   isPinned: Boolean(row.is_pinned),

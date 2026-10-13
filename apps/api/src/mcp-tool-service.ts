@@ -4,8 +4,6 @@ import {
   ARCHITECTURE_RESOURCE_ICONS,
   TemplateCreateSchema,
   TemplateUpdateSchema,
-  docToText,
-  markdownToDoc,
   parseDiagramDocument,
   serializeDiagramDocument,
   stripDiagramDocumentMarker,
@@ -382,7 +380,8 @@ const diagramSemanticGraph = (document: DiagramDocument, includeLayout = false) 
   })),
 });
 
-const memoWithoutDiagramPayload = (memo: MemoDetail) => {
+const memoWithoutDiagramPayload = async (memo: MemoDetail) => {
+  const { docToText, markdownToDoc } = await import("@edgeever/shared/content");
   const contentMarkdown = stripDiagramDocumentMarker(memo.contentMarkdown);
   const contentJson = markdownToDoc(contentMarkdown);
   return { ...memo, contentMarkdown, contentJson, contentText: docToText(contentJson) };
@@ -689,7 +688,7 @@ export const callMcpTool = async (
 
       const diagram = parseDiagramDocument(memo.contentMarkdown);
       return diagram
-        ? { memo: memoWithoutDiagramPayload(memo), diagram: diagramSemanticGraph(diagram) }
+        ? { memo: await memoWithoutDiagramPayload(memo), diagram: diagramSemanticGraph(diagram) }
         : { memo };
     }
     case "create_memo": {
@@ -726,7 +725,7 @@ export const callMcpTool = async (
       }, getAuditActor(c), getActorLabel(c));
 
       return {
-        memo: memoWithoutDiagramPayload(memo),
+        memo: await memoWithoutDiagramPayload(memo),
         diagramKind: document.kind,
         diagram: diagramSemanticGraph(document),
       };
@@ -1166,6 +1165,7 @@ export const callMcpTool = async (
       const title = memo?.title ?? (input.title?.trim() || null);
       const contentMarkdown = memo?.contentMarkdown ?? input.contentMarkdown ?? "";
       const tags = memo?.tags ?? input.tags ?? [];
+      const { markdownToDoc } = await import("@edgeever/shared/content");
       const contentJson = memo?.contentJson ?? markdownToDoc(contentMarkdown);
       await c.env.storage.db.prepare(
         `INSERT INTO memo_templates (
@@ -1202,7 +1202,7 @@ export const callMcpTool = async (
 
       const contentMarkdown = input.contentMarkdown ?? current.contentMarkdown;
       const contentJson = input.contentMarkdown !== undefined
-        ? markdownToDoc(contentMarkdown)
+        ? (await import("@edgeever/shared/content")).markdownToDoc(contentMarkdown)
         : current.contentJson;
       const now = isoNow();
       await c.env.storage.db.prepare(

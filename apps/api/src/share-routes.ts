@@ -1,4 +1,5 @@
-import { collectMemoLinkIds, isPdfAttachment, MemoShareUpdateSchema, PublicShareUnlockSchema, resolveMemoContentDoc, resolvePlayableMediaMimeType, type MemoShare, type PublicMemoShare, type TiptapDoc } from "@edgeever/shared";
+import { isPdfAttachment } from "@edgeever/shared/attachment-detect";
+import { collectMemoLinkIds, MemoShareUpdateSchema, PublicShareUnlockSchema, resolvePlayableMediaMimeType, type MemoShare, type PublicMemoShare, type TiptapDoc } from "@edgeever/shared";
 import { zValidator } from "@hono/zod-validator";
 import type { Hono } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
@@ -147,6 +148,7 @@ export const registerPublicShareRoutes = (app: Hono<AppEnv>) => {
     }
 
     const contentJson = JSON.parse(row.content_json) as TiptapDoc;
+    const { resolveMemoContentDoc } = await import("@edgeever/shared/content");
     const referencedMemoIds = collectMemoLinkIds(resolveMemoContentDoc(contentJson, row.content_markdown));
     const memoShareTokens: Record<string, string> = {};
     for (let offset = 0; offset < referencedMemoIds.length; offset += 80) {

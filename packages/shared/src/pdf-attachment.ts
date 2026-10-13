@@ -2,18 +2,25 @@ import { mergeAttributes, Node } from "@tiptap/core";
 import type { TiptapDoc, TiptapMark, TiptapNode, TiptapTextNode } from "./content";
 import { getAttachmentFilenameFromLabel } from "./resource-links";
 import { normalizeAttachmentByteSize } from "./attachment-metadata";
+import {
+  PDF_ATTACHMENT_NODE_TYPE,
+  PDF_DISPLAY_MODES,
+  resolvePdfDisplayMode,
+  isPdfAttachment,
+  type PdfDisplayMode,
+} from "./attachment-detect";
 
-export const PDF_ATTACHMENT_NODE_TYPE = "edgeeverPdfAttachment" as const;
-export const PDF_DISPLAY_MODES = ["compact", "inline"] as const;
-export type PdfDisplayMode = (typeof PDF_DISPLAY_MODES)[number];
-
-export const resolvePdfDisplayMode = (value: unknown): PdfDisplayMode =>
-  value === "inline" ? "inline" : "compact";
+// The TipTap-free detection helpers live in "./attachment-detect"; re-export them
+// so existing `./pdf-attachment` / barrel import sites keep resolving.
+export {
+  PDF_ATTACHMENT_NODE_TYPE,
+  PDF_DISPLAY_MODES,
+  resolvePdfDisplayMode,
+  isPdfAttachment,
+} from "./attachment-detect";
+export type { PdfDisplayMode } from "./attachment-detect";
 
 const PDF_LINK_PATTERN = /^\[([^\]]+)\]\(([^\s)]+)(?:\s+"[^"]*")?\)/;
-
-export const isPdfAttachment = (mimeType: string | null | undefined, filename: string | null | undefined) =>
-  mimeType?.toLowerCase() === "application/pdf" || filename?.trim().toLowerCase().endsWith(".pdf") === true;
 
 const escapeMarkdownLabel = (value: string) =>
   value.replace(/\\/g, "\\\\").replace(/\[/g, "\\[").replace(/\]/g, "\\]");

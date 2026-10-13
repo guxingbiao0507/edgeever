@@ -1,6 +1,5 @@
+import { emptyDoc } from "@edgeever/shared/content-text";
 import {
-  emptyDoc,
-  markdownToDoc,
   TemplateCreateSchema,
   TemplateUpdateSchema,
   TemplateUseSchema,
@@ -130,6 +129,7 @@ export const registerTemplateRoutes = (
     const title = memo?.title ?? (input.title?.trim() || null);
     const contentMarkdown = memo?.contentMarkdown ?? input.contentMarkdown ?? "";
     const tags = memo?.tags ?? input.tags ?? [];
+    const { markdownToDoc } = await import("@edgeever/shared/content");
     const contentJson = memo?.contentJson ?? markdownToDoc(contentMarkdown);
     await c.env.storage.db.prepare(
       `INSERT INTO memo_templates (
@@ -165,7 +165,7 @@ export const registerTemplateRoutes = (
 
     const contentMarkdown = input.contentMarkdown ?? current.content_markdown;
     const contentJson = input.contentMarkdown !== undefined
-      ? markdownToDoc(contentMarkdown)
+      ? (await import("@edgeever/shared/content")).markdownToDoc(contentMarkdown)
       : JSON.parse(current.content_json);
     const tags = input.tags ?? parseJsonArray(current.tags_json);
     const now = new Date().toISOString();

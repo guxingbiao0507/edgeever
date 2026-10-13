@@ -14,6 +14,21 @@ import {
 import { projectNativeUnknownContentForMarkdown } from "./mobile-content-compatibility";
 import { PluginEmbed, PLUGIN_EMBED_NODE_TYPE } from "./plugin-embed";
 import { ImageGallery, IMAGE_GALLERY_NODE_TYPE, normalizeImageGalleries } from "./image-gallery";
+import {
+  emptyDoc,
+  type TiptapDoc,
+  type TiptapMark,
+  type TiptapNode,
+  type TiptapTextNode,
+} from "./content-text";
+
+// The TipTap-free document primitives (createExcerpt, normalizeTags, emptyDoc, …)
+// are exported by the package barrel directly from "./content-text". They are NOT
+// re-exported here: routing those bindings through this module would pull its heavy
+// TipTap import graph into any consumer that only wanted the lightweight helpers.
+// Only the shared document types are re-exported, for existing relative
+// `import type { … } from "./content"` call sites (types are erased at build time).
+export type { TiptapDoc, TiptapMark, TiptapNode, TiptapTextNode } from "./content-text";
 
 export { PluginEmbed, PLUGIN_EMBED_NODE_TYPE, pluginEmbedToMarkdown, normalizePluginEmbedAttributes } from "./plugin-embed";
 export type { PluginEmbedAttributes } from "./plugin-embed";
@@ -31,71 +46,6 @@ export {
   createMergeDividerNode,
 } from "./merge-divider";
 
-export {
-  PdfAttachment,
-  PDF_ATTACHMENT_NODE_TYPE,
-  PDF_DISPLAY_MODES,
-  isPdfAttachment,
-  resolvePdfDisplayMode,
-  upgradeStandalonePdfLinks,
-} from "./pdf-attachment";
-export type { PdfDisplayMode } from "./pdf-attachment";
-
-export {
-  FileAttachment,
-  FILE_ATTACHMENT_NODE_TYPE,
-  FILE_DISPLAY_MODES,
-  isFileAttachmentLink,
-  resolveFileDisplayMode,
-  upgradeStandaloneFileLinks,
-} from "./file-attachment";
-export type { FileDisplayMode } from "./file-attachment";
-
-export type TiptapTextNode = {
-  type: "text";
-  text: string;
-  marks?: TiptapMark[];
-};
-
-export type TiptapMark = {
-  type: string;
-  attrs?: Record<string, unknown>;
-};
-
-export type TiptapNode = {
-  type: string;
-  attrs?: Record<string, unknown>;
-  content?: Array<TiptapNode | TiptapTextNode>;
-};
-
-export type TiptapDoc = {
-  type: "doc";
-  content: TiptapNode[];
-};
-
-export const DEFAULT_MEMO_TITLE = "无标题笔记";
-
-export const resolveMergedMemoTitle = (
-  inputTitle: string | null | undefined,
-  sourceMemos: Array<{ title: string | null | undefined }>,
-  date = new Date(),
-) => {
-  const explicitTitle = inputTitle?.trim();
-  if (explicitTitle) {
-    return explicitTitle;
-  }
-
-  const customTitle = sourceMemos
-    .map((memo) => memo.title?.trim())
-    .find((title): title is string => Boolean(title && title !== DEFAULT_MEMO_TITLE));
-  return customTitle ?? `合并笔记 ${date.toLocaleDateString("zh-CN")}`;
-};
-
-export const emptyDoc = (): TiptapDoc => ({
-  type: "doc",
-  content: [{ type: "paragraph" }],
-});
-
 export const createEdgeEverMarkdownManager = (
   options: CreateEdgeEverDocumentExtensionsOptions,
 ) => new MarkdownManager({
@@ -105,9 +55,21 @@ export const createEdgeEverMarkdownManager = (
   }),
 });
 
-const markdownManager = createEdgeEverMarkdownManager({
-  mathematics: createEdgeEverMarkdownMathematics(),
-});
+// Instantiating the MarkdownManager builds the full TipTap / ProseMirror schema
+// (StarterKit, Table, Image, TaskList, Markdown, and every custom node). That is
+// the dominant cold-start CPU cost for the Cloudflare Worker, so defer it until a
+// Markdown parse/serialize is actually requested instead of running it at module
+// evaluation time.
+let markdownManagerSingleton: ReturnType<typeof createEdgeEverMarkdownManager> | null = null;
+
+const getMarkdownManager = () => {
+  if (!markdownManagerSingleton) {
+    markdownManagerSingleton = createEdgeEverMarkdownManager({
+      mathematics: createEdgeEverMarkdownMathematics(),
+    });
+  }
+  return markdownManagerSingleton;
+};
 
 const PROTECTED_MARKDOWN_SEGMENT = /(```[\s\S]*?```|~~~[\s\S]*?~~~|\$\$[\s\S]*?\$\$)/g;
 
@@ -131,7 +93,7 @@ export const markdownToDoc = (markdown: string): TiptapDoc => {
     return emptyDoc();
   }
 
-  return markdownManager.parse(expandExtraBlankLinesForParse(normalized)) as TiptapDoc;
+  return getMarkdownManager().parse(expandExtraBlankLinesForParse(normalized)) as TiptapDoc;
 };
 
 const docContainsNodeType = (doc: TiptapDoc, nodeType: string): boolean => {
@@ -344,8 +306,9 @@ export const docToMarkdown = (doc: unknown): string => {
   const serializableDoc = protectLiteralDollarPairs(projectNativeUnknownContentForMarkdown(
     stripEditorOnlyNodes(doc) as TiptapDoc
   ));
-  return markdownManager
-    .serialize(serializableDoc as Parameters<typeof markdownManager.serialize>[0])
+  const manager = getMarkdownManager();
+  return manager
+    .serialize(serializableDoc as Parameters<typeof manager.serialize>[0])
     .replaceAll(LITERAL_DOLLAR_PLACEHOLDER, "\\$");
 };
 
@@ -415,22 +378,3 @@ const getStringAttr = (attrs: Record<string, unknown> | undefined, key: string) 
   return typeof value === "string" ? value.trim() : "";
 };
 
-export const createExcerpt = (text: string, maxLength = 30): string => {
-  const normalized = text.replace(/\s+/g, " ").trim();
-  return normalized.length > maxLength ? `${normalized.slice(0, maxLength)}...` : normalized;
-};
-
-export const normalizeTags = (tags: unknown): string[] => {
-  if (!Array.isArray(tags)) {
-    return [];
-  }
-
-  return Array.from(
-    new Set(
-      tags
-        .map((tag) => (typeof tag === "string" ? tag.trim() : ""))
-        .filter(Boolean)
-        .map((tag) => tag.replace(/^#/, ""))
-    )
-  ).slice(0, 24);
-};

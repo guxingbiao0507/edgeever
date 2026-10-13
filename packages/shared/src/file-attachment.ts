@@ -1,31 +1,29 @@
 import { mergeAttributes, Node } from "@tiptap/core";
 import type { TiptapDoc, TiptapMark, TiptapNode, TiptapTextNode } from "./content";
-import { resolveAttachmentKind } from "./attachment-kind";
 import { getAttachmentFilenameFromLabel } from "./resource-links";
 import { normalizeAttachmentByteSize } from "./attachment-metadata";
+import {
+  FILE_ATTACHMENT_NODE_TYPE,
+  FILE_DISPLAY_MODES,
+  resolveFileDisplayMode,
+  isFileAttachmentLink,
+  type FileDisplayMode,
+} from "./attachment-detect";
 
-export const FILE_ATTACHMENT_NODE_TYPE = "edgeeverFileAttachment" as const;
-export const FILE_DISPLAY_MODES = ["compact", "inline"] as const;
-export type FileDisplayMode = (typeof FILE_DISPLAY_MODES)[number];
-
-/** Video preview defaults to expanded so notes open ready to play. */
-export const resolveFileDisplayMode = (value: unknown): FileDisplayMode =>
-  value === "compact" ? "compact" : "inline";
+// The TipTap-free detection helpers live in "./attachment-detect"; re-export them
+// so existing `./file-attachment` / barrel import sites keep resolving.
+export {
+  FILE_ATTACHMENT_NODE_TYPE,
+  FILE_DISPLAY_MODES,
+  resolveFileDisplayMode,
+  isFileAttachmentLink,
+} from "./attachment-detect";
+export type { FileDisplayMode } from "./attachment-detect";
 
 const MARKDOWN_LINK_PATTERN = /^\[([^\]]+)\]\(([^\s)]+)(?:\s+"[^"]*")?\)/;
-const ATTACHMENT_LABEL_PATTERN = /^\s*(?:附件[：:]|Attachment:)\s*/i;
-const RESOURCE_URL_PATTERN = /(?:\/api\/v1\/resources\/|edgeever-(?:resource|staged):\/\/)/i;
 
 const escapeMarkdownLabel = (value: string) =>
   value.replace(/\\/g, "\\\\").replace(/\[/g, "\\[").replace(/\]/g, "\\]");
-
-export const isFileAttachmentLink = (label: string, url: string) => {
-  const filename = getAttachmentFilenameFromLabel(label) || label || url;
-  if (resolveAttachmentKind(null, filename) === "pdf" || resolveAttachmentKind(null, url) === "pdf") {
-    return false;
-  }
-  return ATTACHMENT_LABEL_PATTERN.test(label) || RESOURCE_URL_PATTERN.test(url) || resolveAttachmentKind(null, filename) !== "file";
-};
 
 export const FileAttachment = Node.create({
   name: FILE_ATTACHMENT_NODE_TYPE,

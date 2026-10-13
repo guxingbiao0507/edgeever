@@ -6,17 +6,19 @@ import {
   markdownToDoc,
   MERGE_DIVIDER_MARKDOWN_MARKER,
   MERGE_DIVIDER_NODE_TYPE,
-  FILE_ATTACHMENT_NODE_TYPE,
-  PDF_ATTACHMENT_NODE_TYPE,
-  resolveFileDisplayMode,
   PLUGIN_EMBED_NODE_TYPE,
   pluginEmbedToMarkdown,
   mergeMemoDocs,
-  resolvePdfDisplayMode,
   resolveMemoContentDoc,
   resolveMemoContentMarkdown,
-  resolveMergedMemoTitle,
 } from "./content.ts";
+import {
+  FILE_ATTACHMENT_NODE_TYPE,
+  PDF_ATTACHMENT_NODE_TYPE,
+  resolveFileDisplayMode,
+  resolvePdfDisplayMode,
+} from "./attachment-detect.ts";
+import { resolveMergedMemoTitle } from "./content-text.ts";
 
 describe("merged memo title", () => {
   test("prefers an explicit title, then the first custom source title", () => {

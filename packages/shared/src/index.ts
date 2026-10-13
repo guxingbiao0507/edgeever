@@ -1,3 +1,5 @@
+export * from "./content-text";
+export * from "./attachment-detect";
 export * from "./content";
 export * from "./document-extensions";
 export * from "./companion";

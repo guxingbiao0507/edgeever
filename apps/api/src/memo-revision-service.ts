@@ -1,9 +1,9 @@
 import {
   createExcerpt,
   DEFAULT_MEMO_TITLE,
-  docToMarkdown,
-  docToText,
   emptyDoc,
+} from "@edgeever/shared/content-text";
+import {
   type MemoDetail,
   type MemoRevision,
   type TiptapDoc,
@@ -197,8 +197,12 @@ export const restoreMemoRevision = async (
 
   const tags = parseJsonArray(revision.tags_json);
   const contentJson = parseDoc(revision.content_json);
-  const contentMarkdown = revision.content_markdown || docToMarkdown(contentJson);
-  const contentText = revision.content_text || docToText(contentJson);
+  // Older revisions may lack a stored Markdown / plain-text projection; re-derive
+  // it on demand so this rarely-used restore path doesn't force TipTap into startup.
+  const needsProjection = !revision.content_markdown || !revision.content_text;
+  const documentModule = needsProjection ? await import("@edgeever/shared/content") : null;
+  const contentMarkdown = revision.content_markdown || documentModule!.docToMarkdown(contentJson);
+  const contentText = revision.content_text || documentModule!.docToText(contentJson);
   const title = normalizeMemoTitle(revision.title);
   const contentHash = await sha256(contentMarkdown + JSON.stringify(contentJson));
   const nextRevision = current.revision + 1;

@@ -1,4 +1,5 @@
-import { isPdfAttachment, resolvePlayableMediaMimeType, ResourceUpdateSchema, type MemoDetail, type Resource } from "@edgeever/shared";
+import { isPdfAttachment } from "@edgeever/shared/attachment-detect";
+import { resolvePlayableMediaMimeType, ResourceUpdateSchema, type MemoDetail, type Resource } from "@edgeever/shared";
 import { zValidator } from "@hono/zod-validator";
 import type { Hono } from "hono";
 import { auditStatement } from "./audit";

@@ -1,17 +1,14 @@
 import {
   createExcerpt,
   DEFAULT_MEMO_TITLE,
-  docToMarkdown,
-  docToText,
   emptyDoc,
-  markdownToDoc,
-  mergeMemoDocs,
-  resolveMemoContentDoc,
+  normalizeTags,
   resolveMergedMemoTitle,
+} from "@edgeever/shared/content-text";
+import {
   isSuspiciousMemoOverwrite,
   isMemoEditBindingValid,
   MAX_MEMO_TITLE_LENGTH,
-  normalizeTags,
   type MemoDetail,
   type MemoEditSession,
   type MemoSummary,
@@ -859,6 +856,8 @@ export const mergeMemosRecord = async (
     .filter((row): row is MemoDetailRow => Boolean(row));
   const notebookId = input.notebookId ?? ordered[0].notebook_id;
   const title = resolveMergedMemoTitle(input.title, ordered);
+  const { docToMarkdown, docToText, mergeMemoDocs, resolveMemoContentDoc } =
+    await import("@edgeever/shared/content");
   const sourceDocs = ordered.map((memo) => {
     const contentJson = parseDoc(memo.content_json);
     const doc = resolveMemoContentDoc(contentJson, memo.content_markdown);
@@ -949,6 +948,7 @@ export const createMemoRecord = async (
 ): Promise<MemoDetail> => {
   const tags = normalizeTags(input.tags);
   const contentMarkdown = input.contentMarkdown ?? "";
+  const { docToText, markdownToDoc } = await import("@edgeever/shared/content");
   const contentJson = input.contentJson && typeof input.contentJson === "object"
     ? input.contentJson as TiptapDoc
     : markdownToDoc(contentMarkdown);
@@ -1308,19 +1308,22 @@ export const updateMemoRecord = async (
   }
 
   const currentContentJson = parseDoc(current.content_json);
+  // Only a document change needs TipTap; load it on demand so metadata-only
+  // updates (rename, retag, move, pin) never pull the editor into startup.
+  const documentModule = hasDocumentUpdate ? await import("@edgeever/shared/content") : null;
   const contentJson =
     input.contentJson !== undefined
       ? input.contentJson
       : input.contentMarkdown !== undefined
-        ? markdownToDoc(input.contentMarkdown)
+        ? documentModule!.markdownToDoc(input.contentMarkdown)
         : currentContentJson;
   const contentMarkdown =
     input.contentMarkdown !== undefined
       ? input.contentMarkdown
       : input.contentJson !== undefined
-        ? docToMarkdown(contentJson)
+        ? documentModule!.docToMarkdown(contentJson)
         : current.content_markdown;
-  const contentText = hasDocumentUpdate ? docToText(contentJson) : current.content_text;
+  const contentText = hasDocumentUpdate ? documentModule!.docToText(contentJson) : current.content_text;
   const title =
     input.title !== undefined ? normalizeMemoTitle(input.title) : normalizeMemoTitle(current.title);
   if (

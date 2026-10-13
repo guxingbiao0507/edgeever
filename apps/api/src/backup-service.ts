@@ -1,10 +1,10 @@
 import {
   createExcerpt,
   DEFAULT_MEMO_TITLE,
-  docToMarkdown,
-  docToText,
   emptyDoc,
   normalizeTags,
+} from "@edgeever/shared/content-text";
+import {
   type JsonBackupMemo,
   type JsonBackupNotebook,
   type TiptapDoc,
@@ -109,6 +109,10 @@ export const restoreJsonMemos = async (
 ) => {
   await assertIdsAvailableInWorkspace(db, "memos", workspaceId, backups.map((backup) => backup.memo.id));
   await assertNotebookIdsInWorkspace(db, workspaceId, backups.map((backup) => backup.memo.notebookId));
+
+  // Restore re-derives Markdown/plain-text for backups that omit them, so pull in
+  // the heavy TipTap-backed document module on demand rather than at startup.
+  const { docToMarkdown, docToText } = await import("@edgeever/shared/content");
 
   for (const backup of backups) {
     const memo = backup.memo;

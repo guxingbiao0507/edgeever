@@ -1,9 +1,4 @@
-import {
-  createExcerpt,
-  docToText,
-  markdownToDoc,
-  normalizeTags,
-} from "@edgeever/shared";
+import { createExcerpt, normalizeTags } from "@edgeever/shared/content-text";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { resolveContainerImageSource } from "./container-image-source";
@@ -525,6 +520,10 @@ const ensureDemoSeed = async (
   env: Bindings,
   options: { overwriteExisting?: boolean; refreshResources?: boolean } = {},
 ) => {
+  // Demo seeding is the only place the Worker parses Markdown into TipTap docs,
+  // so load the heavy TipTap-backed document module on demand here instead of at
+  // module evaluation time.
+  const { docToText, markdownToDoc } = await import("@edgeever/shared/content");
   const db = env.storage.db;
   const now = isoNow();
   const statements: D1PreparedStatement[] = [];
